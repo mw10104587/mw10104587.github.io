@@ -1,0 +1,24 @@
+To Do List - Election Map
+
+
+1. modify translation of upper bound and lower bound
+XXX 2. votes and comma
+3. move liangJon county into the map.
+4. make bounds clear = =!!! 
+5. there is a blank in Keelung....
+XXX6. modify full width to 950px
+7. try to integrate three data set.
+8. put codes on Heroku. !!!
+9. Hualien, change party color.
+XXX10. sea pressed, loss function.
+10. Five doo XD
+11. 2006 Hualien
+12. Kaoshiang, Taichang problem
+
+
+To Do List 2 - Food Project
+XXX1. How to calculate and show detail.
+XXX2. Coin animation
+XXX3. show static data. to line chart. (You can use high chart !!)
+XXX4. search how to change page........
+5. 

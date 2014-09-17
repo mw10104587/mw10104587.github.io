@@ -1,0 +1,829 @@
+<!DOCTYPE html>
+<meta charset="UTF8">
+<html>
+<head>
+<style>
+
+</style>
+<script type="text/javascript" src="d3.js"></script>
+<script type="text/javascript" src="topojson.js"></script>
+<script type="text/javascript" src="Library/require.js"></script>
+<script type="text/javascript" src="jquery-1.11.1.js"></script>
+<script type="text/javascript" src="Chart.js-master/Chart.js"></script>
+<script type="text/javascript" src="updatemap_helper.js"></script>
+
+<script type="text/javascript" src="https://www.google.com/jsapi"></script>
+<script src="echarts-1.4.1/build/echarts-plain.js" > </script>
+<link rel="stylesheet" type="text/css" href="d3-map.css">
+<link rel="stylesheet" type="text/css" href="css/bootstrap.css">
+
+<script type="text/javascript">
+
+var zoomedInCounty = false; //a boolean saving whether it is zoomed
+var zoomedCounty; // saving 
+var transitioning = false;
+var currentDisplayYear = 2010;
+ 
+  //Draw pie here
+
+$(document).ready(function(){
+
+  d3.csv("map/town-name-mapping.csv", function(data){  
+    //console.log(data);
+    mapDic = data;
+  });
+});
+
+//this topo file's COUNTYNAME Changes, we'll have to update it.
+d3.json("2010/twCounty2010.topo.json", function (data) {
+//d3.json("udn-election-project/topo.json/twCounty2010.topo.json", function (data) {
+  // load data with topojson.js
+  topo = topojson.feature(data, data.objects.layer1);
+
+  // prepare a Mercator projection for Taiwan
+  prj = d3.geo.mercator().center([120.979531, 23.978567]).scale(8000);
+  path = d3.geo.path().projection(prj);
+
+  width = 650; // 800
+  height = 580; //780
+
+
+//var seaLayer = document.getElementById("svg-container");
+var seaLayer = document.getElementById("map");
+seaLayer.onclick = function(){
+  console.log("on click sea");
+  if (!zoomedInCounty) {console.log("returned!!!"); return;};
+  mapZoomInDrawTownFrom("sea");
+}
+// render them on a svg element with id "map"
+blocks = d3.select("svg#map")
+           .attr("width",width)
+           .attr("height", height)
+           //.on("click", function(d){
+            //console.log("svg clicked");
+            //if (zoomedInCounty) {
+              //console.log("gotta zoom out");
+            //};
+           //})
+          .append("g")
+           .attr("id","map-g")
+           .selectAll("path").data(topo.features).enter()
+          .append("path")
+           .attr("d",path)
+           .attr("class", "block")
+           .attr("fill", "none")
+           .attr("stroke","#828282")
+           //.attr("stroke", "black")
+           .attr("stroke-width","0.3")
+           .on("mouseout", function(d){
+
+
+            if (transitioning) {
+              return;
+            } 
+            if (zoomedInCounty) {
+              if (this.__data__ == zoomedCounty) {
+                console.log("so that when we leave during zoom, the stroke-width won't change");
+                return;
+              };
+            };
+            d3.select(this).transition().duration(300).attr("stroke-width","0.3");
+           })//mouse out end
+           .on("click", function(d){
+            d3.event.stopPropagation();
+            console.log("====== county Clicked ======");  
+            //setDetailCandidateRatiosWith();
+            if(d != zoomedCounty){
+              mapZoomInDrawTownFrom(d);
+            }
+           });//on click end
+
+  
+
+  //the reference Dic that would be modified while user 
+  //change between 2010,2006,2002
+  referenceCountyDic = {};
+  //load related function, like current part or population
+  //this csv would be modified while changing between years.
+  //load 2010 first because it's the default year.
+  d3.csv("Taiwan-election-county-2010.csv",function(error,data){
+
+      //turn the data into a hash table
+      var county2014 = {};
+      for (var i = data.length - 1; i >= 0; i--) {
+        county2014[data[i]["縣市別"]] = {};
+        county2014[data[i]["縣市別"]]["KMT-votes"] = data[i]["KMT-votes"];
+        county2014[data[i]["縣市別"]]["DPP-votes"] = data[i]["DPP-votes"];
+        county2014[data[i]["縣市別"]]["KMT-ratio"] = data[i]["KMT-ratio"];
+        county2014[data[i]["縣市別"]]["DPP-ratio"] = data[i]["DPP-ratio"];
+        county2014[data[i]["縣市別"]]["KMT-can"]   = data[i]["KMT-candidate"];
+        county2014[data[i]["縣市別"]]["DPP-can"]   = data[i]["DPP-candidate"];
+        county2014[data[i]["縣市別"]]["Other-votes"] = data[i]["Other-votes"];
+        county2014[data[i]["縣市別"]]["Other-ratio"] = data[i]["Other-ratio"];
+        county2014[data[i]["縣市別"]]["Sum-votes"] = data[i]["Sum-votes"];
+      }
+
+      referenceCountyDic = county2014;
+
+      blocks.on("mouseover", function(d){
+        //make it appears to be hoverd by changing it's stroke-width
+        //only change stroke-width when not zoomed
+        if (zoomedInCounty){ return; }
+        if (transitioning) { return; }
+
+        //add width to the county's line
+        d3.select(this).transition().duration(300)
+          .attr("stroke-width","2.5")
+          .attr("stroke", "#828282");
+      
+        var countyName = d.properties.COUNTYNAME;
+        console.log("???????????????????????????????????");
+        console.log(countyName);
+        if (currentDisplayYear == 2006) {
+          countyName = check2006CountyName(countyName);
+
+        };
+
+        //set more info.
+
+        setMoreInfoWithCountyName(countyName);
+
+
+        var kmtCan = referenceCountyDic[countyName]["KMT-can"];
+        var kmtVotes = referenceCountyDic[countyName]["KMT-votes"];
+        var dppCan = referenceCountyDic[countyName]["DPP-can"];
+        var dppVotes = referenceCountyDic[countyName]["DPP-votes"];
+        var kmtRatio = referenceCountyDic[countyName]["KMT-ratio"];
+        var dppRatio = referenceCountyDic[countyName]["DPP-ratio"];
+        var otherRatio = referenceCountyDic[countyName]["Other-ratio"];
+        setDetailCountyName(countyName);
+        setDetailCandidateAndVotesWith(kmtCan, kmtVotes, dppCan, dppVotes );
+        updatePie(kmtRatio, dppRatio, otherRatio);
+
+      })//mouse over end
+      
+      blocks.attr("fill",function(d){
+        if (d.properties.COUNTYNAME == "花蓮縣" && currentDisplayYear == 2010) {
+          //console.log("in here = =");
+          return "#D3D3D3";
+        };
+
+        return partyMapFourGradient(referenceCountyDic, d.properties.COUNTYNAME);
+      });
+  }); //load 2014 end
+
+  //make pie !!
+  drawPie();
+  
+    
+});
+
+
+function notInKingMan(townName){
+  if (townName == "金門縣") {return false;};
+  if (townName == "金城鎮") {return false;};
+  if (townName == "金寧鄉") {return false;};
+  if (townName == "烈嶼鄉") {return false;};
+  if (townName == "金湖鎮") {return false;};
+  if (townName == "金沙鎮") {return false;};
+  return true;
+}
+
+
+//by giving the dic saving info and the name of county or town,
+//return color
+partyMapFourGradient = function(countyDic, countyName){
+
+  //console.log(countyDic);
+  //console.log(countyName);
+  var _countyName = replaceSpecialCasesNames(countyName);
+  //for county, currently only New Taipei county
+
+  if (currentDisplayYear == 2002) {
+    if (_countyName == "那瑪夏鄉") {_countyName == "三民鄉"};
+  };
+  if (currentDisplayYear == 2006) {
+    if (_countyName == "燕巢鄉") {
+      //return "red"
+    };
+    _countyName = check2006CountyName(_countyName);
+    _countyName = replace2006TownsName(_countyName)
+    if (_countyName == "那瑪夏鄉") {_countyName == "三民鄉"};
+  };
+        
+  //console.log(_countyName);
+
+  var kmtRatio = countyDic[_countyName]["KMT-ratio"];
+  var dppRatio = countyDic[_countyName]["DPP-ratio"];
+  var otherRatio = countyDic[_countyName]["Other-ratio"];
+  var threshold1 = 20;
+  var threshold2 = 40;
+  var threshold3 = 60;
+
+  //although JingMan has 60% of non-party votes, the winner is still from KMT.
+  if (Math.max(kmtRatio, dppRatio, otherRatio) == otherRatio && notInKingMan(countyName)) { return "#D3D3D3"; };
+
+  var d = kmtRatio - dppRatio;
+  //console.log(countyName + ":" + d.toString());
+  if (         0 < d && d < threshold1) {return "#87AFD7";}
+  if (threshold1 < d && d < threshold2) {return "#5A87C3";}
+  if (threshold2 < d && d < threshold3) {return "#3C69A0";}
+  if (threshold3 < d )             {return "#285078";}
+  if (          0 > d && d > (-1*threshold1)) {return "#A0E66E";}
+  if (-1*threshold1 > d && d > -1*threshold2 ) {return "#78DC3C";}
+  if (-1*threshold2 > d && d> -1*threshold3){return "#5ABE1E";}
+  if (-1*threshold3 > d              ){return "#468C14";}
+}
+
+//if zoomed, eliminate town path and zoom back
+//if not zoomed, zoom in and show town paths.
+function mapZoomInDrawTownFrom(d){
+
+  //if zoomed and pressed on any county, zoom out
+  if(zoomedInCounty){
+
+    var b = path.bounds(zoomedCounty);
+
+    //zoom back the towns and make border thin, and delete it.  
+    towns.transition().duration(750)
+         .attr("transform","").attr("stroke-width","0.01")
+         .each("end", function(){
+           d3.select("#zoom-to-town").remove();
+         });;
+
+    blocks.transition().duration(750).attr("transform", "")
+      .attr("fill-opacity",1.0)
+      .each("start",transitionStart)
+      .each("end",transitionEnd);
+    //zoom out
+    setDetailDitrictName("");
+    removeBorderTopOfCountyName();
+
+    //check the border of the zoomed county, make it thinner XDDD
+    var zoomedSelection = d3.selectAll(".block").filter(function(data,i){return zoomedCounty == data});
+    zoomedSelection.attr("stroke-width",0.3);
+    zoomedInCounty = false;
+    zoomedCounty = null;
+    //delete all info
+    setMoreInfo("");
+
+  }
+  else{
+
+    //load the geojson data from json file and
+    var townGeoFileName = currentDisplayYear.toString() + "/townGeoHash-" + currentDisplayYear.toString() + ".json";
+
+    d3.json( townGeoFileName ,function(error, data){
+      //console.log("townGeoHash");
+      //console.log(data);  
+      countyName = d.properties.COUNTYNAME;
+      //console.log(countyName);
+      var leftCorrection = 28;
+      if (countyName == "臺北市") {leftCorrection = 5;};
+      if (countyName == "嘉義市") {leftCorrection = 3;};
+      if (countyName == "臺中市") {leftCorrection = 22;};
+      if (countyName == "臺南市") {leftCorrection = 15;};
+      if (countyName == "新竹市") {leftCorrection = 8;};
+      if (countyName == "基隆市") {leftCorrection = 8;};
+      if (countyName == "澎湖縣") {leftCorrection = 10;};
+      if (countyName == "金門縣") {leftCorrection = 4;};
+      if (countyName == "高雄市" && currentDisplayYear != 2010) {leftCorrection = 12;};
+      //zoom in
+      var b = path.bounds(d);
+      //
+      if (countyName == "臺中市" && currentDisplayYear == 2010) { 
+        b = [[408.6056894976864, 179.08777760002067], [545.8219453397614, 246.96217007458426]];
+        };
+      if (countyName == "臺南市" && currentDisplayYear == 2010) {
+        b = [[347.6480277484734, 336.17837999322], [434.86781606413206, 415.79756298360735]];
+      };
+      if (countyName == "高雄市" && currentDisplayYear == 2010) {
+        b = [[ 367.66898454316834, 327.64401588120927], [ 489.67378717810425, 478.36338133310664]];
+      };
+
+
+      blocks.transition().duration(650).attr("transform", 
+          "translate(" + prj.translate() + ")"
+          + "scale(" + .75 / Math.max((b[1][0] - b[0][0]) / width, (b[1][1] - b[0][1]) / height) + ")"
+          + "translate(" + (-(b[1][0] + b[0][0]) / 2 - leftCorrection) + "," + (-(b[1][1] + b[0][1]) / 2 + 1) + ")" )
+        .attr("fill-opacity",0.1)
+        .each("start",transitionStart)
+        .each("end", function(){
+          
+          //once the one pressed is enlarged, we drawn the town
+          if (this.__data__ == d) {
+            transitionEnd();
+
+            var zoomCountyName = d.properties.COUNTYNAME;
+            if (currentDisplayYear == 2006) {
+              zoomCountyName = check2006CountyName(zoomCountyName);
+            };
+
+            if (currentDisplayYear == 2002) {
+              zoomCountyName = check2002CountyName(zoomCountyName);
+            };
+            //console.log("county name is: "+ zoomCountyName);
+            //update county info
+            
+            var townsDataFileName = currentDisplayYear.toString() + "/" + zoomCountyName + "-" + currentDisplayYear.toString() + ".csv";
+            townsDic = {};
+            d3.csv(townsDataFileName, function(error, _data){
+              console.log("###########################");
+              //console.log(_data);
+              for (var i = 0; i < _data.length; i++) {
+
+                if(_data[i]["行政區別"] == "當選人" ){
+                  townsDic["elected"] = _data[i]["KMT-votes"];
+                  townsDic["elected-party"] = _data[i]["KMT-ratio"];
+                  continue;
+                }
+                
+                if (_data[i]["行政區別"] == "候選人") {
+                  console.log("in here");
+                  townsDic["KMT-can"] = _data[i]["KMT-votes"];
+                  townsDic["DPP-can"] = _data[i]["KMT-ratio"];
+                  continue;
+                };
+
+                //console.log(_data[i]["行政區別"]);
+                var town = _data[i]["行政區別"].replace(/\s+/g, '');
+                townsDic[town] = {};
+                townsDic[town]["sum"] = _data[i]["sum"];
+                townsDic[town]["DPP-ratio"] = _data[i]["DPP-ratio"];
+                townsDic[town]["DPP-votes"] = _data[i]["DPP-votes"];
+                townsDic[town]["KMT-ratio"] = _data[i]["KMT-ratio"];
+                townsDic[town]["KMT-votes"] = _data[i]["KMT-votes"];
+                townsDic[town]["Other-ratio"] = _data[i]["Other-ratio"];
+                townsDic[town]["Other-votes"] = _data[i]["Other-votes"];
+                
+              };//for loop end
+              
+              towns = d3.select("svg#map").append("g")
+              .attr("id","zoom-to-town")
+              .selectAll("path").data( data[zoomCountyName].features ).enter()
+             .append("path")
+              .attr("d", path)
+              .attr("fill", "none")
+              //.............................................................
+              //they don't like black
+              .attr("stroke", "#828282")
+              .attr("stroke-width",".3")
+              //fill color and opacity here.
+              .attr("fill", function(d){
+                //special cases in 2002
+                if (currentDisplayYear == 2002) {
+                  if (d.properties.town.replace(/\s+/g,"") == "公鄉") {
+                    return partyMapFourGradient(townsDic, "公館鄉");
+                  };
+                  if (d.properties.town.replace(/\s+/g,"") == "福興鄉") {
+                    return partyMapFourGradient(townsDic, "褔興鄉");
+                  };
+                  if (d.properties.town.replace(/\s+/g,"") == "那瑪夏鄉") {
+                    return partyMapFourGradient(townsDic, "三民鄉"); 
+                  };
+                  if ( !notInKingMan( d.properties.town.replace(/\s+/g,"") ) ) {
+                    console.log("yes they are in Kingmen?!");
+                    return "#D3D3D3";
+                  };
+                };
+                //special cases in 2006
+                if (currentDisplayYear == 2006) {
+                  if (d.properties.town.replace(/\s+/g,"") == "那瑪夏鄉") {
+                    return partyMapFourGradient(townsDic, "三民鄉");
+                  };
+                  if (d.properties.town.replace(/\s+/g,"") == "公鄉") {
+                    return partyMapFourGradient(townsDic, "公館鄉");
+                  };
+                  if ( !notInKingMan( d.properties.town.replace(/\s+/g,"") ) ) {
+                    console.log("yes they are in Kingmen?!");
+                    return "#D3D3D3";
+                  };
+                };
+
+                //console.log("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@");
+                //console.log(d.properties.town);
+                return partyMapFourGradient(townsDic, d.properties.town.replace(/\s+/g, ''));
+              })
+              //.attr("fill-opacity","0.8")
+              .attr("transform",
+          "translate(" + prj.translate() + ")"
+          + "scale(" + .75 / Math.max((b[1][0]- b[0][0]) / width, (b[1][1] - b[0][1]) / height) + ")"
+          + "translate(" + (-(b[1][0] + b[0][0]) / 2 - leftCorrection)+ "," + (-(b[1][1] + b[0][1]) / 2 + 1 )+ ")")
+              .on("mouseover", function(d){
+                //make it appears to be hoverd by changing it's alpha.
+                var townName = replaceSpecialCasesNames(d.properties.town);
+                if (currentDisplayYear == 2002) { 
+                  townName = replace2006TownsName(townName);
+                  if (townName == "那瑪夏鄉") {
+                    townName = "三民鄉"
+                  };
+                };
+                if (currentDisplayYear == 2006) { 
+                  townName = replace2006TownsName(townName);
+                  if (townName == "那瑪夏鄉") {
+                    townName = "三民鄉"
+                  };
+                };
+                setDetailDitrictName(townName);
+                showBorderTopOfCountyName();
+                updatePie(townsDic[townName]["KMT-ratio"],townsDic[townName]["DPP-ratio"],townsDic[townName]["Other-ratio"]);
+                d3.select(this)//.attr("fill"," #FFFFFF")
+                .attr("fill-opacity","0.3");  
+              })
+              .on("mouseout",function(d){
+                d3.select(this).attr("fill-opacity","1.0");
+              })
+              .on("mouseenter",function(d){
+                var townName = replaceSpecialCasesNames(d.properties.town);
+                if (currentDisplayYear == 2002) {
+                  if (townName == "公鄉") {
+                   townName = "公館鄉";
+                  };
+                  if (townName == "福興鄉") {
+                    townName = "褔興鄉";
+                  };
+                  if (townName == "那瑪夏鄉") {
+                    townName = "三民鄉"; 
+                  };
+                };
+                if (currentDisplayYear == 2006) { 
+                  townName = replace2006TownsName(townName);
+                };
+                setDetailDitrictName(townName);
+                //console.log(townName);
+                setDetailCandidateAndVotesWith(townsDic["KMT-can"],townsDic[townName]["KMT-votes"],
+                  townsDic["DPP-can"], townsDic[townName]["DPP-votes"]);
+              });
+            });
+          }// if this.__data__ == d end
+        }); // each "end" end
+      
+    });
+  
+    zoomedInCounty = true;
+    zoomedCounty = d;
+  }
+}
+
+function zoomOut(){
+
+  if(zoomedInCounty){
+    //zoom back the towns and make border thin, and delete it.  
+    towns.transition().duration(450)
+         .attr("transform","").attr("stroke-width","0.01")
+         .each("end", function(){
+           d3.select("#zoom-to-town").remove();
+         });;
+
+    blocks.transition().duration(450).attr("transform", "")
+      .attr("fill-opacity",1.0)
+      .each("start",transitionStart)
+      .each("end",transitionEnd);
+    blocks.attr("stroke-width", 0.3);
+    //zoom out
+    setDetailDitrictName("");
+    removeBorderTopOfCountyName();
+
+    zoomedInCounty = false;
+    zoomedCounty = null;
+    //delete all info
+    setMoreInfo("");
+  }
+}
+
+function transitionStart(){
+  transitioning = true;
+}
+
+function transitionEnd(){
+  transitioning = false;
+}
+
+function setDetailCountyName(countyName){
+  //$("#county-name").html(countyName);
+  document.getElementById("county-name").innerHTML = countyName;
+}
+
+function setDetailDitrictName(districtName){
+  //$("#districtName").html(districtName);
+  document.getElementById("district-name").innerHTML = districtName;
+}
+ 
+function setDetailCandidateAndVotesWith(kmtCan,kmtVotes,dppCan,dppVotes){
+  d3.select("#kmt-can").text(kmtCan);
+  d3.select("#dpp-can").text(dppCan);
+  var _kmtVotes = kmtVotes;
+  var _dppVotes = dppVotes;
+  if (typeof kmtVotes == "number") { _kmtVotes == kmtVotes.toLocaleString();};
+  if (typeof dppVotes == "number") { _dppVotes == dppVotes.toLocaleString();};
+  if (typeof kmtVotes == "string" && kmtVotes.search(",") == -1) {
+    _kmtVotes = parseInt(kmtVotes).toLocaleString();
+  };
+  if (typeof dppVotes == "string" && dppVotes.search(",") == -1) {
+    _dppVotes = parseInt(dppVotes).toLocaleString();
+  };
+  d3.select("#kmt-votes").text( _kmtVotes);
+  d3.select("#dpp-votes").text( _dppVotes);
+}
+
+function removeDetailCandidateRatios(){
+
+  //$("#ratios-container").fadeOut(200);
+  document.getElementById("ratios-container").innerHTML = "";  
+
+}
+
+function drawPie() {
+  var pieWidth = 180,
+      pieHeight = 180,
+      radius = Math.min(pieWidth, pieHeight) / 2;
+
+  var color = d3.scale.ordinal()
+      .domain(["民進黨","國民黨","無黨籍"])
+      .range(["#5ABE1E", "#3C69A0", "#D3D3D3"]);
+
+  var arc = d3.svg.arc()
+      .outerRadius(radius - 10)
+      .innerRadius(0);
+
+  var pie = d3.layout.pie()
+      .sort(null)
+      .value(function(d) { return d.votes; });
+
+  var pieSvg = d3.select("#pie-container").append("svg")
+      .attr("width", pieWidth)
+      .attr("height", pieHeight)
+    .append("g")
+      .attr("transform", "translate(" + pieWidth / 2 + "," + pieHeight / 2 + ")");
+
+    //a global var saving the data for the pie.
+    pieData = [
+      {"party": "民進黨", "votes":300},
+      {"party": "國民黨", "votes":200},
+      {"party": "無黨籍", "votes":5}
+    ]
+    
+    var sum = 0;
+    for (var i = 0; i < pieData.length; i++) {
+      //console.log(pieData[i]);
+      sum = sum + pieData[i].votes;
+    };
+
+    var g = pieSvg.selectAll(".arc")
+        .data(pie(pieData))
+      .enter().append("g")
+        .attr("class", "arc");
+
+    g.append("path")
+        .attr("d", arc)
+        .style("fill", function(d) { return color(d.data.party); });
+
+    g.append("text")
+        .attr("transform", function(d) { return "translate(" + arc.centroid(d) + ")"; })
+        .attr("dy", ".35em")
+        .style("text-anchor", "middle")
+        .text(function(d) { 
+          var number = parseFloat( d.data.votes/sum ).toFixed(2) * 100;
+          var string = number.toString();
+          return  string + "%"; 
+        });
+
+}
+
+function updatePie(kmt,dpp,others){
+  //haven't implement the text label for pie percentage.
+
+  var pieWidth = 180,
+      pieHeight = 180,
+      radius = Math.min(pieWidth, pieHeight) / 2;
+
+  var pie = d3.layout.pie()
+      .sort(null)
+      .value(function(d) { return d.votes; });
+
+  var arc = d3.svg.arc()
+      .outerRadius(radius - 10)
+      .innerRadius(0);
+
+  pieData[0].votes = dpp;
+  pieData[1].votes = kmt;
+  pieData[2].votes = others;
+
+  var g = d3.select("#pie-container").selectAll(".arc").data(pie(pieData));
+  d3.select("#pie-container").selectAll("path").data(pie(pieData)).attr("d",arc);
+
+  d3.select("#pie-container").selectAll("text").remove();
+  d3.select("#pie-container").selectAll(".arc")
+   .append("text")
+    .attr("transform", function(d) {
+      return "translate(" + arc.centroid(d) + ")"; })
+    .attr("dy", ".35em")
+    .style("text-anchor", "middle")
+    .text(function(d){
+      if (d.data.votes == 0) {return;};
+      var string = d.data.votes.toString();
+      return  string + "%"; 
+    });
+  //so that the bigger arc won't stand in front of smaller arc's text.
+  sortPieText();
+}
+
+//currently designed for LianJohn County
+function updatePieForSpecialCases(r1,c1,r2,c2,r3,c3){
+  
+  var pieWidth = 180,
+      pieHeight = 180,
+      radius = Math.min(pieWidth, pieHeight) / 2;
+
+  var pie = d3.layout.pie()
+      .sort(null)
+      .value(function(d) { return d.votes; });
+
+  var arc = d3.svg.arc()
+      .outerRadius(radius - 10)
+      .innerRadius(0);
+
+  var color = d3.scale.ordinal()
+      .domain([r1,r2,r3])
+      .range([c1, c2, c3]);
+
+  //default color green
+  pieData[0].votes = r1;
+  //default color blue
+  pieData[1].votes = r2;
+  //default color gray
+  pieData[2].votes = r3;
+
+
+  var g = d3.select("#pie-container").selectAll(".arc").data(pie(pieData));
+  d3.select("#pie-container").selectAll("path").data(pie(pieData)).attr("d",arc);
+  d3.select("#pie-container").selectAll("text").remove();
+  d3.select("#pie-container").selectAll(".arc")
+   .append("text")
+    .attr("transform", function(d) {
+      return "translate(" + arc.centroid(d) + ")"; })
+    .attr("dy", ".35em")
+    .attr("fill", function(d){ return color(d.data.votes);})
+    .style("text-anchor", "middle")
+    .text(function(d){
+      if (d.data.votes == 0) {return;};
+      var string = d.data.votes.toString();
+      return  string + "%"; 
+    });
+  //so that the bigger arc won't stand in front of smaller arc's text.
+  sortPieText();
+
+
+}
+
+function sortPieText(){
+  d3.select("#pie-container").selectAll(".arc").sort(function(a,b){
+    //console.log("======");
+    if (a.votes > b.votes) {return 1;}
+    else {return -1};
+  })  
+}
+
+function replaceSpecialCasesNames(name){
+
+  if (name == "清水區(海)") { return "清水區";};
+  if (name == "梧棲區(海)") { return "梧棲區";};
+  if (name == "龍井區(海)") { return "龍井區";};
+  if (name == "鼓山區(海)") { return "鼓山區";};
+  if (name == "小港區(海)") { return "小港區";};
+  if (name == "前鎮區(海)") { return "前鎮區";};
+  if (name == "旗津區(海)") { return "旗津區";};
+  if (name == "楊梅市"){ return "楊梅鎮";};
+  //if (name == "福興鄉") { return "褔興鄉"};
+
+  return name;
+}
+
+
+
+
+function replace2006TownsName(name){
+  
+  //path?
+  for ( var i = 0; i < mapDic.length; i++){
+      if (name == mapDic[i]["新行政區"]) { return mapDic[i]["舊行政區"]; };
+  }
+
+  return name;
+}
+
+function setMoreInfo(info){
+  d3.select("#more-info").html(info);
+}
+
+
+//save all kind of more information in this function!
+function setMoreInfoWithCountyName(countyName){
+
+  if (countyName == "臺北縣" && currentDisplayYear == 2002) {
+    setMoreInfo("無國民黨候選人");
+  }
+  else if(countyName == "連江縣" && currentDisplayYear == 2002) {
+    setMoreInfo("無民進黨候選人");  
+  }
+  else if(countyName == "金門縣" && currentDisplayYear == 2006) {
+    setMoreInfo("由新黨的李炷烽贏得選戰，<br>國民黨和民進黨都沒有推派候選人。");  
+  }
+  else if(countyName == "臺東縣" && currentDisplayYear == 2006){
+    setMoreInfo("由無黨籍的吳俊立贏得選戰，<br>國民黨和民進黨都沒有推派候選人。");
+  }
+  else if(countyName == "連江縣" && currentDisplayYear == 2006){
+    setMoreInfo("無國民黨和民進黨候選人");
+  }
+  else if (countyName == "花蓮縣" && currentDisplayYear == 2010) {
+    setMoreInfo("無黨籍范崐萁當選");
+  }
+  else if (countyName == "連江縣" && currentDisplayYear == 2010) {
+    setMoreInfo("國民黨推出兩位候選人楊綏生、劉增應,票數為兩人總和");
+  }
+  else{
+    setMoreInfo("");
+  }
+
+}
+
+function removeBorderTopOfCountyName(){
+  $("#line-seperator").fadeOut();
+}
+
+function showBorderTopOfCountyName(){
+  //$("#line-seperator").fadeIn();
+}
+
+
+function check2002CountyName(countyName){
+  if (countyName == "新北市") {return "臺北縣";};
+  return countyName;
+}
+
+function check2006CountyName(countyName){
+  if (countyName == "新北市") {return "臺北縣";};
+  return countyName;
+}
+
+
+
+</script>
+</head>
+<body>
+<div class="container" id="udn-size">
+<div id="svg-container">
+  <div id="title-container"><h1 id="map-title">2009縣市長選舉 + 2010五都市長選舉</h1></div>
+  <svg id="map">
+  
+  </svg>
+  <div id="pagination-container">
+    <ul class="pagination">
+      <!--li><a href="#">&laquo;</a></li-->
+      <li><a href="#" id="pg-2002">'01+'02</a></li>
+      <li><a href="#" id="pg-2006">'05+'06</a></li>
+      <li><a href="#" id="pg-2010">'09+'10</a></li>
+      <!--li><a href="#">&raquo;</a></li-->
+    </ul>
+  </div>
+</div>
+
+  <div id="tooltip">
+  </div>
+
+  <div id="detail-container">
+    
+    <div id="district-name">
+        
+    </div>
+    <div id="line-seperator">
+
+    </div>
+    <div id="county-name">
+        
+    </div>
+    
+    <div id="pie-container">
+      
+    </div>
+    <!--div id="piechart" style="width: 180px; height: 180px;"></div-->
+    <div id="ratios-container">
+        <div class="candidate">
+          <div class="logo"><img src="kmt-logo.jpg" id="kmt-logo"></div>
+          <div class="name" id="kmt-can">郝龍斌</div>
+          <div class="votes" id="kmt-votes">100000</div>
+        </div>
+        <div class="candidate">
+          <div class="logo"><img src="dpp-logo.png" id="kmt-logo"></div>
+          <div class="name" id="dpp-can">蘇貞昌</div>
+          <div class="votes" id="dpp-votes">100000</div>
+        </div>
+    </div>
+    <div id="more-info">
+
+    </div>
+  </div><!--Detail Container end-->
+</div>
+
+</body>
+</html>
